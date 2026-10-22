@@ -1,0 +1,94 @@
+server:
+  # 换成 8081：8080 是 llama.cpp 等本地模型工具的常用默认端口，
+  # 浏览器里那个地址很容易残留旧页面（打开就是 llama，得手动刷新）。
+  # start.bat 里也有 PORT 变量，两处保持一致即可。
+  port: 8081
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true
+
+spring:
+  application:
+    name: motochat
+  threads:
+    virtual:
+      enabled: true          # JDK 21 虚拟线程：阻塞式 LLM 调用不占平台线程
+  task:
+    scheduling:
+      pool:
+        # 默认是 1。这个项目有两个 @Scheduled 任务 + 主动消息的动态排期，
+        # 而提醒触发会同步调用 LLM（最长 120 秒）。池只有 1 个线程时，
+        # 一条提醒就能把后续所有定时任务卡住两分钟。
+        size: 4
+      thread-name-prefix: motochat-sched-
+  datasource:
+    url: jdbc:mysql://127.0.0.1:3306/motochat?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+    username: root
+    password: ""
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 5000
+  sql:
+    init:
+      mode: always            # 启动时执行 schema.sql，建表用 IF NOT EXISTS
+      schema-locations: classpath:schema.sql
+      continue-on-error: false
+  web:
+    resources:
+      static-locations: classpath:/static/
+      cache:
+        cachecontrol:
+          max-age: 0
+          cache-public: false
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+  jackson:
+    default-property-inclusion: always
+    serialization:
+      write-dates-as-timestamps: false
+  mvc:
+    # 前端 HTML 全部按 /static/ 前缀引用 CSS/JS/图片（沿用原版 FastAPI 把静态目录挂在 /static 的做法）。
+    # 不配这项的话静态资源的默认映射是 /**，/static/style.css 会全部 404——
+    # 页面没样式、login.js 加载不了，登录按钮点了没反应。
+    static-path-pattern: /static/**
+    async:
+      # SSE 长连接不能有超时，LLM 生成长回复可能超过默认的 30 秒
+      request-timeout: -1
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+
+motochat:
+  data-root: ./userdata          # 运行时数据（头像/图片/语音/记忆）
+  session-ttl-days: 7
+  session-max: 1000
+  login-rate-limit: 10           # 每分钟每 IP 失败次数上限
+  # 是否信任 X-Forwarded-For 取客户端 IP。默认 false：该头由客户端完全可控，
+  # 无条件信任等于让登录/聊天限流失效（换个头值就换个"IP"）。
+  # 只有明确部署在受信反代之后才设为 true。
+  trust-forwarded-for: false
+  # WebSocket 允许的 Origin（逗号分隔，* 表示全部）。
+  # Cookie 是 SameSite=Lax，跨站带不上 Cookie，默认 * 即可；需要收紧时填具体 origin。
+  ws-allowed-origins: "*"
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
+
+logging:
+  level:
+    root: INFO
+    com.motochat: DEBUG
